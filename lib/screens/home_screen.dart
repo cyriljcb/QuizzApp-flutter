@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../providers/game_provider.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -116,13 +117,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(height: 32),
                       _isLoading
                           ? const CircularProgressIndicator()
-                          : ElevatedButton.icon(
-                              onPressed: _joinRoom,
-                              icon: const Icon(Icons.login_rounded),
-                              label: const Text(
-                                'Rejoindre la partie',
-                                style: TextStyle(fontSize: 16),
-                              ),
+                          : Column(
+                              children: [
+                                ElevatedButton.icon(
+                                  onPressed: _joinRoom,
+                                  icon: const Icon(Icons.login_rounded),
+                                  label: const Text(
+                                    'Rejoindre la partie',
+                                    style: TextStyle(fontSize: 16),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      context.push('/create-room'),
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  label: const Text(
+                                    'Creer une room',
+                                    style: TextStyle(fontSize: 16),
+                                  ),
+                                ),
+                              ],
                             ),
                     ],
                   ),

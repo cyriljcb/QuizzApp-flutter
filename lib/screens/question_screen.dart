@@ -4,7 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/game_provider.dart';
 
 class QuestionScreen extends ConsumerStatefulWidget {
-  const QuestionScreen({super.key, required bool isSuddenDeath});
+  const QuestionScreen({super.key});
 
   @override
   ConsumerState<QuestionScreen> createState() => _QuestionScreenState();

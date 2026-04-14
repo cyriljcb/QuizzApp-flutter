@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'providers/game_provider.dart';
+import 'screens/create_room_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/lobby_screen.dart';
 import 'screens/question_screen.dart';
@@ -35,13 +36,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         RoundResultState() => '/round-result',
         GameOverState()    => '/game-over',
         ErrorState()       => null,
-        SuddenDeathState() => '/question',
+        SuddenDeathState() => null,
       };
     },
     routes: [
       GoRoute(
         path: '/home',
         builder: (context, state) => const HomeScreen(),
+      ),
+      GoRoute(
+        path: '/create-room',
+        builder: (context, state) => const CreateRoomScreen(),
       ),
       GoRoute(
         path: '/lobby',
@@ -54,12 +59,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           final round = gameState is QuestionState
               ? gameState.question.roundNumber
               : 0;
-          final isSuddenDeath = gameState is QuestionState &&
-              (ref.read(gameProvider) is SuddenDeathState ||
-                  state.extra == 'suddenDeath');
           return QuestionScreen(
             key: ValueKey('question_$round'),
-            isSuddenDeath: isSuddenDeath,
           );
         },
       ),
