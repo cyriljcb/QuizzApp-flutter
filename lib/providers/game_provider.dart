@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:quiz/core/constants.dart';
 import '../core/signalr_service.dart';
 import '../models/question_payload.dart';
 import '../models/round_result.dart';
-import '../models/player_result.dart';
 
 // ─── États ────────────────────────────────────────────────────────────────────
 
@@ -16,17 +19,20 @@ class LobbyState extends GameState {
   final String roomCode;
   final String pseudo;
   final List<String> players;
+  final bool isHost;
 
   LobbyState({
     required this.roomCode,
     required this.pseudo,
     required this.players,
+    this.isHost = false,
   });
 
   LobbyState copyWith({List<String>? players}) => LobbyState(
         roomCode: roomCode,
         pseudo: pseudo,
         players: players ?? this.players,
+        isHost: isHost,
       );
 }
 
@@ -57,6 +63,7 @@ class QuestionState extends GameState {
         question: question,
         hasAnswered: hasAnswered ?? this.hasAnswered,
         answeredPlayers: answeredPlayers ?? this.answeredPlayers,
+        isSuddenDeath: isSuddenDeath,
       );
 }
 
@@ -85,6 +92,7 @@ class ErrorState extends GameState {
 
   ErrorState({required this.message, this.previousState});
 }
+
 class SuddenDeathState extends GameState {
   final String roomCode;
   final String pseudo;
@@ -119,97 +127,152 @@ class GameNotifier extends Notifier<GameState> {
     return IdleState();
   }
 
+  // ─── Connexion + callbacks partagés ───────────────────────────────────────
+
+  Future<void> _connectWithCallbacks() async {
+    await _signalR.connect(SignalRCallbacks(
+      onRoomCreated: (code, pseudo) {
+        // L'hôte arrive en lobby avec isHost = true et est seul pour l'instant
+        state = LobbyState(
+          roomCode: code,
+          pseudo: pseudo,
+          players: [pseudo],
+          isHost: true,
+        );
+      },
+      onRoomJoined: (code, pseudo, players) {
+        state = LobbyState(
+          roomCode: code,
+          pseudo: pseudo,
+          players: players,
+          isHost: false,
+        );
+      },
+      onPlayerJoined: (p) {
+        final current = state;
+        if (current is LobbyState) {
+          state = current.copyWith(players: [...current.players, p]);
+        }
+      },
+      onPlayerLeft: (p) {
+        final current = state;
+        if (current is LobbyState) {
+          state = current.copyWith(
+            players: current.players.where((pl) => pl != p).toList(),
+          );
+        }
+      },
+      onGameStarted: (_, __) {},
+      onNewQuestion: (data) {
+        final roomCode = _extractRoomCode(state);
+        final pseudo = _extractPseudo(state);
+        if (roomCode == null || pseudo == null) return;
+
+        final isSuddenDeath = state is SuddenDeathState;
+
+        state = QuestionState(
+          roomCode: roomCode,
+          pseudo: pseudo,
+          question: QuestionPayload.fromData(data),
+          isSuddenDeath: isSuddenDeath,
+        );
+      },
+      onAnswerReceived: (_) {},
+      onPlayerAnswered: (p) {
+        final current = state;
+        if (current is QuestionState) {
+          state = current.copyWith(
+            answeredPlayers: [...current.answeredPlayers, p],
+          );
+        }
+      },
+      onRoundResult: (data) {
+        final roomCode = _extractRoomCode(state);
+        final pseudo = _extractPseudo(state);
+        if (roomCode == null || pseudo == null) return;
+        state = RoundResultState(
+          roomCode: roomCode,
+          pseudo: pseudo,
+          result: RoundResult.fromData(data),
+        );
+      },
+      onGameOver: (scores) {
+        state = GameOverState(
+          pseudo: _extractPseudo(state) ?? '',
+          scores: scores,
+        );
+      },
+      onHostLeft: (message) {
+        state = ErrorState(message: message, previousState: state);
+      },
+      onError: (message) {
+        state = ErrorState(message: message, previousState: state);
+      },
+      onReconnected: () {
+        final current = state;
+        final roomCode = _extractRoomCode(current);
+        final pseudo = _extractPseudo(current);
+        if (roomCode == null || pseudo == null) return;
+        print('🔄 Reconnexion — rejoin room $roomCode');
+        _signalR.rejoinRoom(roomCode, pseudo);
+      },
+      onSuddenDeath: (tiedPlayers) {
+        final roomCode = _extractRoomCode(state);
+        final pseudo = _extractPseudo(state);
+        if (roomCode == null || pseudo == null) return;
+        state = SuddenDeathState(
+          roomCode: roomCode,
+          pseudo: pseudo,
+          tiedPlayers: tiedPlayers,
+        );
+      },
+    ));
+  }
+
+  // ─── Actions publiques ────────────────────────────────────────────────────
+
+  /// Crée une room — l'appelant devient l'hôte
+  Future<void> createRoom(String pseudo) async {
+    state = ConnectingState();
+    try {
+      await _connectWithCallbacks();
+      await _signalR.createRoom(pseudo);
+    } catch (e) {
+      state = ErrorState(message: 'Connexion impossible : $e');
+    }
+  }
+
+  /// Rejoint une room existante en tant que joueur
   Future<void> joinRoom(String roomCode, String pseudo) async {
     state = ConnectingState();
-
     try {
-      await _signalR.connect(SignalRCallbacks(
-        onRoomJoined: (code, p, players) {
-          state = LobbyState(roomCode: code, pseudo: p, players: players);
-        },
-        onPlayerJoined: (p) {
-          final current = state;
-          if (current is LobbyState) {
-            state = current.copyWith(players: [...current.players, p]);
-          }
-        },
-        onPlayerLeft: (p) {
-          final current = state;
-          if (current is LobbyState) {
-            state = current.copyWith(
-              players: current.players.where((pl) => pl != p).toList(),
-            );
-          }
-        },
-        onGameStarted: (_, __) {},
-        onNewQuestion: (data) {
-          final roomCode = _extractRoomCode(state);
-          final pseudo = _extractPseudo(state);
-          if (roomCode == null || pseudo == null) return;
-
-          final isSuddenDeath = state is SuddenDeathState;
-
-          state = QuestionState(
-            roomCode: roomCode,
-            pseudo: pseudo,
-            question: QuestionPayload.fromData(data),
-            isSuddenDeath: isSuddenDeath,
-          );
-        },
-        onAnswerReceived: (_) {},
-        onPlayerAnswered: (p) {
-          final current = state;
-          if (current is QuestionState) {
-            state = current.copyWith(
-              answeredPlayers: [...current.answeredPlayers, p],
-            );
-          }
-        },
-        onRoundResult: (data) {
-          final roomCode = _extractRoomCode(state);
-          final pseudo = _extractPseudo(state);
-          if (roomCode == null || pseudo == null) return;
-          state = RoundResultState(
-            roomCode: roomCode,
-            pseudo: pseudo,
-            result: RoundResult.fromData(data),
-          );
-        },
-        onGameOver: (scores) {
-          state = GameOverState(
-            pseudo: _extractPseudo(state) ?? '',
-            scores: scores,
-          );
-        },
-        onHostLeft: (message) {
-          state = ErrorState(message: message, previousState: state);
-        },
-        onError: (message) {
-          state = ErrorState(message: message, previousState: state);
-        },
-        onReconnected: () {
-          final current = state;
-          final roomCode = _extractRoomCode(current);
-          final pseudo = _extractPseudo(current);
-          if (roomCode == null || pseudo == null) return;
-          print('🔄 Reconnexion — rejoin room $roomCode');
-          _signalR.rejoinRoom(roomCode, pseudo);
-        },
-        onSuddenDeath: (tiedPlayers) {
-          final roomCode = _extractRoomCode(state);
-          final pseudo = _extractPseudo(state);
-          if (roomCode == null || pseudo == null) return;
-          state = SuddenDeathState(
-            roomCode: roomCode,
-            pseudo: pseudo,
-            tiedPlayers: tiedPlayers,
-          );
-        },
-      ));
-
+      await _connectWithCallbacks();
       await _signalR.joinRoom(roomCode, pseudo);
     } catch (e) {
       state = ErrorState(message: 'Connexion impossible : $e');
+    }
+  }
+  Future<List<String>> fetchThemes() async {
+    final response = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/api/question/themes')
+    );
+
+    if (response.statusCode == 200) {
+      final List data = jsonDecode(response.body);
+      return data.cast<String>();
+    } else {
+      throw Exception('Erreur chargement thèmes');
+    }
+  }
+
+  /// Lance la partie (hôte seulement)
+  Future<void> startGame({String? theme}) async {
+    final current = state;
+    if (current is! LobbyState || !current.isHost) return;
+    try {
+      await _signalR.startGame(current.roomCode, theme: theme);
+    } catch (e) {
+      print('❌ startGame échoué: $e');
     }
   }
 

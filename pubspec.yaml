@@ -24,6 +24,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   flutter_animate: ^4.5.0      # animations fluides (timer, transitions)
   cached_network_image: ^3.3.1  # images des questions
+  vibration: ^2.0.0           #vibration pour le timer
 
   # HTTP (pour les endpoints REST)
   http: ^1.2.1

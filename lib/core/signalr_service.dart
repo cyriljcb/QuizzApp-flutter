@@ -3,6 +3,7 @@ import 'constants.dart';
 
 /// Callbacks vers le GameProvider
 class SignalRCallbacks {
+  final void Function(String roomCode, String pseudo) onRoomCreated;
   final void Function(String roomCode, String pseudo, List<String> players) onRoomJoined;
   final void Function(String pseudo) onPlayerJoined;
   final void Function(String pseudo) onPlayerLeft;
@@ -18,6 +19,7 @@ class SignalRCallbacks {
   final void Function(List<String> tiedPlayers) onSuddenDeath;
 
   const SignalRCallbacks({
+    required this.onRoomCreated,
     required this.onRoomJoined,
     required this.onPlayerJoined,
     required this.onPlayerLeft,
@@ -90,7 +92,6 @@ class FinalScore {
         score = map['score'] as int;
 }
 
-
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class SignalRService {
@@ -130,7 +131,7 @@ class SignalRService {
       _isConnected = true;
       print('🟢 SignalR reconnecté : $connectionId');
       _callbacks?.onReconnected();
-      
+
       Future.delayed(const Duration(seconds: 3), () {
         _isRejoining = false;
       });
@@ -148,13 +149,22 @@ class SignalRService {
 
   // ─── CLIENT → SERVEUR ─────────────────────────────────────────────────────
 
+  Future<void> createRoom(String pseudo) async {
+    await _hub.invoke('CreateRoom', args: [pseudo]);
+  }
+
   Future<void> joinRoom(String roomCode, String pseudo) async {
     await _hub.invoke('JoinRoom', args: [roomCode, pseudo]);
+  }
+
+  Future<void> startGame(String roomCode, {String? theme}) async {
+    await _hub.invoke('StartGame', args: [roomCode, theme??'']);
   }
 
   Future<void> submitAnswer(String roomCode, String answer) async {
     await _hub.invoke('SubmitAnswer', args: [roomCode, answer]);
   }
+
   Future<void> rejoinRoom(String roomCode, String pseudo) async {
     await _hub.invoke('RejoinRoom', args: [roomCode, pseudo]);
   }
@@ -162,6 +172,18 @@ class SignalRService {
   // ─── SERVEUR → CLIENT ─────────────────────────────────────────────────────
 
   void _registerHandlers() {
+    _hub.on('RoomCreated', (args) {
+      try {
+        if (args == null || _callbacks == null) return;
+        final payload = args[0] as Map<String, dynamic>;
+        final roomCode = payload['roomCode'] as String;
+        final pseudo = payload['pseudo'] as String;
+        _callbacks!.onRoomCreated(roomCode, pseudo);
+      } catch (e) {
+        print('❌ RoomCreated error: $e');
+      }
+    });
+
     _hub.on('RoomJoined', (args) {
       try {
         if (args == null || _callbacks == null) return;
@@ -286,11 +308,6 @@ class SignalRService {
       }
     });
 
-    _hub.onreconnected(({String? connectionId}) {
-      _isConnected = true;
-      print('🟢 SignalR reconnecté : $connectionId');
-      _callbacks?.onReconnected();
-    });
     _hub.on('SuddenDeath', (args) {
       try {
         if (args == null || _callbacks == null) return;
